@@ -4,6 +4,7 @@ export type VenueId = 'A1' | 'A2' | 'B1';
 export type SessionId = 'operator-A' | 'viewer-A' | 'operator-B';
 export type JobStatus = 'FAILED' | 'QUEUED' | 'HEALTHY';
 
+export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_RETRY_ATTEMPTS = 3;
 export const RETRY_BACKOFF_SCHEDULE_MS = [1000, 2000, 4000] as const;
 
@@ -49,6 +50,13 @@ export interface StubConfig {
   force500Remaining: number;
   neverComplete: boolean;
   forceRetryFail: boolean;
+}
+
+export interface PaginationMeta {
+  readonly page: number;
+  readonly limit: number;
+  readonly total: number;
+  readonly totalPages: number;
 }
 
 export interface SimulationStats {

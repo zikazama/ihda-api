@@ -3,7 +3,7 @@ import type { JobRecord, TenantId, VenueId } from '../common/types';
 
 export const JOBS_REPOSITORY = Symbol('JOBS_REPOSITORY');
 
-const MAX_SIMULATED_JOBS = 25;
+const MAX_SIMULATED_JOBS = 200;
 
 const SIMULATED_PROVIDERS = [
   'Toast POS',

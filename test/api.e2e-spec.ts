@@ -364,4 +364,45 @@ describe('Integration Health API (NestJS stub)', () => {
       maxRetries: 3,
     });
   });
+
+  it('supports pagination at 50 items per page across seeded simulation data and validates bounds', async () => {
+    const seedRes = await request(app.getHttpServer())
+      .post('/api/stub/simulate-tick')
+      .set('Authorization', 'Bearer operator-A')
+      .send({ venueId: 'ALL', minCount: 55, maxCount: 55 })
+      .expect(200);
+    expect(seedRes.body.generatedCount).toBe(55);
+    expect(seedRes.body.items).toHaveLength(57);
+
+    const page1 = await request(app.getHttpServer())
+      .get('/api/jobs?page=1&limit=50')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(200);
+    expect(page1.body.items).toHaveLength(50);
+    expect(page1.body.pagination).toEqual({
+      page: 1,
+      limit: 50,
+      total: 57,
+      totalPages: 2,
+    });
+
+    const page2 = await request(app.getHttpServer())
+      .get('/api/jobs?page=2&limit=50')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(200);
+    expect(page2.body.items).toHaveLength(7);
+    expect(page2.body.pagination).toEqual({
+      page: 2,
+      limit: 50,
+      total: 57,
+      totalPages: 2,
+    });
+    const page2Ids = (page2.body.items as Array<{ id: string }>).map((item) => item.id);
+    expect(page2Ids.slice(-2)).toEqual(['j1', 'j2']);
+
+    await request(app.getHttpServer())
+      .get('/api/jobs?page=0&limit=50')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(400);
+  });
 });

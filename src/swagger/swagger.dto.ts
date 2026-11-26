@@ -86,9 +86,26 @@ export class JobDto {
   isSimulated!: boolean;
 }
 
+export class PaginationMetaDto {
+  @ApiProperty({ example: 1 })
+  page!: number;
+
+  @ApiProperty({ example: 50 })
+  limit!: number;
+
+  @ApiProperty({ example: 57 })
+  total!: number;
+
+  @ApiProperty({ example: 2 })
+  totalPages!: number;
+}
+
 export class JobListResponseDto {
   @ApiProperty({ type: [JobDto] })
   items!: JobDto[];
+
+  @ApiPropertyOptional({ type: PaginationMetaDto })
+  pagination?: PaginationMetaDto;
 }
 
 export class RetryQueuedResponseDto {
@@ -155,10 +172,10 @@ export class SimulateTickRequestDto {
   })
   venueId?: string;
 
-  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 3 })
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 60 })
   minCount?: number;
 
-  @ApiPropertyOptional({ example: 3, minimum: 1, maximum: 3 })
+  @ApiPropertyOptional({ example: 3, minimum: 1, maximum: 60 })
   maxCount?: number;
 }
 

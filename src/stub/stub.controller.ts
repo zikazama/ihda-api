@@ -338,19 +338,19 @@ export class StubController {
         rawVenueId = raw.venueId;
       }
       if ('minCount' in raw && raw.minCount !== undefined) {
-        if (typeof raw.minCount !== 'number' || !Number.isInteger(raw.minCount) || raw.minCount < 1 || raw.minCount > 3) {
+        if (typeof raw.minCount !== 'number' || !Number.isInteger(raw.minCount) || raw.minCount < 1 || raw.minCount > 60) {
           throw new BadRequestException({
             error: 'INVALID_MIN_COUNT',
-            message: 'minCount must be an integer between 1 and 3.',
+            message: 'minCount must be an integer between 1 and 60.',
           });
         }
         minCount = raw.minCount;
       }
       if ('maxCount' in raw && raw.maxCount !== undefined) {
-        if (typeof raw.maxCount !== 'number' || !Number.isInteger(raw.maxCount) || raw.maxCount < 1 || raw.maxCount > 3) {
+        if (typeof raw.maxCount !== 'number' || !Number.isInteger(raw.maxCount) || raw.maxCount < 1 || raw.maxCount > 60) {
           throw new BadRequestException({
             error: 'INVALID_MAX_COUNT',
-            message: 'maxCount must be an integer between 1 and 3.',
+            message: 'maxCount must be an integer between 1 and 60.',
           });
         }
         maxCount = raw.maxCount;

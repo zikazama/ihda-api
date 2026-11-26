@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -6,14 +7,42 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  DEFAULT_PAGE_SIZE,
   MAX_RETRY_ATTEMPTS,
   resolvePermittedVenueFilter,
   toPublicJobDto,
   type JobPublicDto,
+  type PaginationMeta,
   type SessionRecord,
 } from '../common/types';
 import { StubService } from '../stub/stub.service';
 import { JOBS_REPOSITORY, type JobsRepository } from './jobs.repository';
+
+function parseOptionalPositiveInt(
+  raw: string | undefined,
+  field: 'page' | 'limit',
+  max: number,
+  fallback: number,
+): number {
+  if (raw === undefined || raw.trim() === '') {
+    return fallback;
+  }
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new BadRequestException({
+      error: field === 'page' ? 'INVALID_PAGE' : 'INVALID_LIMIT',
+      message: `${field} must be an integer between 1 and ${max}.`,
+    });
+  }
+  const value = Number.parseInt(trimmed, 10);
+  if (value < 1 || value > max) {
+    throw new BadRequestException({
+      error: field === 'page' ? 'INVALID_PAGE' : 'INVALID_LIMIT',
+      message: `${field} must be an integer between 1 and ${max}.`,
+    });
+  }
+  return value;
+}
 
 @Injectable()
 export class JobsService {
@@ -22,7 +51,12 @@ export class JobsService {
     private readonly stubService: StubService,
   ) {}
 
-  async listJobs(session: SessionRecord, rawVenueId?: string): Promise<{ items: JobPublicDto[] }> {
+  async listJobs(
+    session: SessionRecord,
+    rawVenueId?: string,
+    rawPage?: string,
+    rawLimit?: string,
+  ): Promise<{ items: JobPublicDto[]; pagination: PaginationMeta }> {
     const resolved = resolvePermittedVenueFilter(session, rawVenueId);
     if (!resolved.ok) {
       throw new ForbiddenException({
@@ -31,6 +65,12 @@ export class JobsService {
       });
     }
 
+    const hasExplicitPagination =
+      (rawPage !== undefined && rawPage.trim() !== '') ||
+      (rawLimit !== undefined && rawLimit.trim() !== '');
+    const page = parseOptionalPositiveInt(rawPage, 'page', 1000, 1);
+    const limit = parseOptionalPositiveInt(rawLimit, 'limit', 100, DEFAULT_PAGE_SIZE);
+
     await this.stubService.applyFaultsAndDelay(resolved.venueFilter);
 
     const jobs = this.jobsRepository.listByTenantAndVenues(
@@ -38,9 +78,31 @@ export class JobsService {
       session.venueIds,
       resolved.venueFilter,
     );
+    const allDtos = jobs.map((job) => toPublicJobDto(job));
+    const total = allDtos.length;
 
+    if (!hasExplicitPagination) {
+      return {
+        items: allDtos,
+        pagination: {
+          page: 1,
+          limit: Math.max(total, DEFAULT_PAGE_SIZE),
+          total,
+          totalPages: Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE)),
+        },
+      };
+    }
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
     return {
-      items: jobs.map((job) => toPublicJobDto(job)),
+      items: allDtos.slice(start, start + limit),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
     };
   }
 

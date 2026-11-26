@@ -1,6 +1,7 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCookieAuth,
@@ -16,7 +17,7 @@ import {
   ApiUnauthorizedResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
-import type { JobPublicDto, SessionRecord } from '../common/types';
+import type { JobPublicDto, PaginationMeta, SessionRecord } from '../common/types';
 import { RolesGuard } from '../session/roles.guard';
 import { CurrentSession, Roles } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
@@ -24,6 +25,7 @@ import {
   ErrorResponseDto,
   JobDto,
   JobListResponseDto,
+  PaginationMetaDto,
   RetryQueuedResponseDto,
 } from '../swagger/swagger.dto';
 import { JobsService } from './jobs.service';
@@ -31,7 +33,7 @@ import { JobsService } from './jobs.service';
 @ApiTags('Jobs')
 @ApiBearerAuth('bearer-session')
 @ApiCookieAuth('cookie-session')
-@ApiExtraModels(JobDto, JobListResponseDto, RetryQueuedResponseDto, ErrorResponseDto)
+@ApiExtraModels(JobDto, JobListResponseDto, PaginationMetaDto, RetryQueuedResponseDto, ErrorResponseDto)
 @Controller('api/jobs')
 @UseGuards(SessionGuard)
 export class JobsController {
@@ -48,6 +50,20 @@ export class JobsController {
     enum: ['ALL', 'A1', 'A2', 'B1'],
     example: 'A1',
     description: 'Optional venue filter. Unpermitted venues return 403 before delay or fault injection.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    example: 1,
+    description: 'Optional 1-based page number. Omit page and limit to receive all scoped jobs.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    example: 50,
+    description: 'Optional page size (1..100, default 50 when page is specified).',
   })
   @ApiOkResponse({
     description: 'Tenant-scoped list of integration jobs.',
@@ -156,11 +172,25 @@ export class JobsController {
       },
     },
   })
+  @ApiBadRequestResponse({
+    description: 'Invalid page or limit query parameter.',
+    content: {
+      'application/json': {
+        schema: { $ref: getSchemaPath(ErrorResponseDto) },
+        example: {
+          error: 'INVALID_PAGE',
+          message: 'page must be an integer between 1 and 1000.',
+        },
+      },
+    },
+  })
   listJobs(
     @CurrentSession() session: SessionRecord,
     @Query('venueId') venueId?: string,
-  ): Promise<{ items: JobPublicDto[] }> {
-    return this.jobsService.listJobs(session, venueId);
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ items: JobPublicDto[]; pagination: PaginationMeta }> {
+    return this.jobsService.listJobs(session, venueId, page, limit);
   }
 
   @Get(':id')
