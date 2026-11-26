@@ -246,6 +246,7 @@ describe('Integration Health API (NestJS stub)', () => {
       '/api/jobs/{id}/retry',
       '/api/stub/config',
       '/api/stub/reset',
+      '/api/stub/simulate-tick',
     ]) {
       expect(doc.paths).toHaveProperty(apiPath);
     }
@@ -270,5 +271,97 @@ describe('Integration Health API (NestJS stub)', () => {
     expect(stubConfigPost?.responses?.['200']?.content?.['application/json']?.examples).toHaveProperty(
       'forced500OnceResponse',
     );
+  });
+
+  it('enforces tenant isolation on POST /api/stub/simulate-tick and resets simulated jobs cleanly', async () => {
+    await request(app.getHttpServer()).post('/api/stub/simulate-tick').send({}).expect(401);
+
+    await request(app.getHttpServer())
+      .post('/api/stub/simulate-tick')
+      .set('Authorization', 'Bearer operator-A')
+      .send({ venueId: 'B1' })
+      .expect(403);
+
+    const tickRes = await request(app.getHttpServer())
+      .post('/api/stub/simulate-tick')
+      .set('Authorization', 'Bearer operator-A')
+      .send({ venueId: 'ALL', minCount: 1, maxCount: 3 })
+      .expect(200);
+
+    expect(tickRes.body.generatedCount).toBeGreaterThanOrEqual(1);
+    expect(tickRes.body.generatedCount).toBeLessThanOrEqual(3);
+    expect(tickRes.body.generated).toHaveLength(tickRes.body.generatedCount);
+    for (const item of tickRes.body.generated as Array<{ id: string; venueId: string; status: string; isSimulated: boolean; maxRetries: number }>) {
+      expect(item.id).toMatch(/^sim-/);
+      expect(['A1', 'A2']).toContain(item.venueId);
+      expect(['HEALTHY', 'FAILED']).toContain(item.status);
+      expect(item.isSimulated).toBe(true);
+      expect(item.maxRetries).toBe(3);
+    }
+
+    const resetRes = await request(app.getHttpServer()).post('/api/stub/reset').expect(200);
+    expect(resetRes.body.status).toBe('reset');
+
+    const afterReset = await request(app.getHttpServer())
+      .get('/api/jobs')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(200);
+    const ids = (afterReset.body.items as Array<{ id: string }>).map((item) => item.id);
+    expect(ids).toEqual(['j1', 'j2']);
+  });
+
+  it('enforces max 3x retry limit with escalating backoff schedule and rejects 4th attempt with 409', async () => {
+    await request(app.getHttpServer())
+      .post('/api/stub/config')
+      .send({ forceRetryFail: true })
+      .expect(200);
+
+    const initial = await request(app.getHttpServer())
+      .get('/api/jobs/j1')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(200);
+    expect(initial.body).toMatchObject({
+      retryCount: 0,
+      maxRetries: 3,
+      nextRetryDelayMs: 1000,
+    });
+
+    const expectedDelays: Array<number | null> = [2000, 4000, null];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await request(app.getHttpServer())
+        .post('/api/jobs/j1/retry')
+        .set('Authorization', 'Bearer operator-A')
+        .expect(202);
+
+      await request(app.getHttpServer())
+        .get('/api/jobs/j1')
+        .set('Authorization', 'Bearer operator-A')
+        .expect(200);
+
+      const poll2 = await request(app.getHttpServer())
+        .get('/api/jobs/j1')
+        .set('Authorization', 'Bearer operator-A')
+        .expect(200);
+
+      expect(poll2.body).toMatchObject({
+        id: 'j1',
+        status: 'FAILED',
+        retryCount: attempt,
+        maxRetries: 3,
+        nextRetryDelayMs: expectedDelays[attempt - 1],
+      });
+    }
+
+    const fourthRetry = await request(app.getHttpServer())
+      .post('/api/jobs/j1/retry')
+      .set('Authorization', 'Bearer operator-A')
+      .expect(409);
+
+    expect(fourthRetry.body).toMatchObject({
+      error: 'MAX_RETRIES_EXCEEDED',
+      jobId: 'j1',
+      retryCount: 3,
+      maxRetries: 3,
+    });
   });
 });

@@ -7,6 +7,7 @@ const DEFAULT_STUB_CONFIG: StubConfig = {
   force500: false,
   force500Remaining: 0,
   neverComplete: false,
+  forceRetryFail: false,
 };
 
 function sleep(ms: number): Promise<void> {
@@ -85,6 +86,16 @@ export class StubService {
         });
       }
       next.neverComplete = raw.neverComplete;
+    }
+
+    if ('forceRetryFail' in raw) {
+      if (typeof raw.forceRetryFail !== 'boolean') {
+        throw new BadRequestException({
+          error: 'INVALID_FORCE_RETRY_FAIL',
+          message: 'forceRetryFail must be a boolean.',
+        });
+      }
+      next.forceRetryFail = raw.forceRetryFail;
     }
 
     this.config = next;

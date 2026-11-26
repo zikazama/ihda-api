@@ -68,6 +68,22 @@ export class JobDto {
     description: 'Number of GET /api/jobs/:id polls recorded while QUEUED (detail endpoint only).',
   })
   pollCount?: number;
+
+  @ApiProperty({ example: 0, minimum: 0, maximum: 3 })
+  retryCount!: number;
+
+  @ApiProperty({ example: 3 })
+  maxRetries!: number;
+
+  @ApiProperty({
+    example: 1000,
+    nullable: true,
+    description: 'Escalating retry backoff wait in ms before the next attempt (1000 -> 2000 -> 4000, or null if not FAILED / max reached).',
+  })
+  nextRetryDelayMs!: number | null;
+
+  @ApiProperty({ example: false })
+  isSimulated!: boolean;
 }
 
 export class JobListResponseDto {
@@ -98,6 +114,9 @@ export class StubConfigDto {
 
   @ApiProperty({ example: false })
   neverComplete!: boolean;
+
+  @ApiProperty({ example: false })
+  forceRetryFail!: boolean;
 }
 
 export class UpdateStubConfigRequestDto {
@@ -115,6 +134,9 @@ export class UpdateStubConfigRequestDto {
 
   @ApiPropertyOptional({ example: false })
   neverComplete?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  forceRetryFail?: boolean;
 }
 
 export class ResetStubResponseDto {
@@ -123,6 +145,49 @@ export class ResetStubResponseDto {
 
   @ApiProperty({ type: StubConfigDto })
   config!: StubConfigDto;
+}
+
+export class SimulateTickRequestDto {
+  @ApiPropertyOptional({
+    example: 'ALL',
+    enum: ['ALL', 'A1', 'A2', 'B1'],
+    description: 'Optional venue filter within authenticated tenant scope.',
+  })
+  venueId?: string;
+
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 3 })
+  minCount?: number;
+
+  @ApiPropertyOptional({ example: 3, minimum: 1, maximum: 3 })
+  maxCount?: number;
+}
+
+export class SimulationStatsDto {
+  @ApiProperty({ example: 5 })
+  total!: number;
+
+  @ApiProperty({ example: 3 })
+  healthy!: number;
+
+  @ApiProperty({ example: 2 })
+  failed!: number;
+
+  @ApiProperty({ example: 0 })
+  queued!: number;
+}
+
+export class SimulateTickResponseDto {
+  @ApiProperty({ example: 2, minimum: 1, maximum: 3 })
+  generatedCount!: number;
+
+  @ApiProperty({ type: [JobDto] })
+  generated!: JobDto[];
+
+  @ApiProperty({ type: [JobDto] })
+  items!: JobDto[];
+
+  @ApiProperty({ type: SimulationStatsDto })
+  stats!: SimulationStatsDto;
 }
 
 export class ErrorResponseDto {
@@ -137,4 +202,10 @@ export class ErrorResponseDto {
 
   @ApiPropertyOptional({ example: 'QUEUED' })
   status?: string;
+
+  @ApiPropertyOptional({ example: 3 })
+  retryCount?: number;
+
+  @ApiPropertyOptional({ example: 3 })
+  maxRetries?: number;
 }

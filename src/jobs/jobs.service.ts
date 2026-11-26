@@ -5,25 +5,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { JobPublicDto, JobRecord, SessionRecord, VenueId } from '../common/types';
-import { isVenueId } from '../common/types';
+import {
+  MAX_RETRY_ATTEMPTS,
+  resolvePermittedVenueFilter,
+  toPublicJobDto,
+  type JobPublicDto,
+  type SessionRecord,
+} from '../common/types';
 import { StubService } from '../stub/stub.service';
 import { JOBS_REPOSITORY, type JobsRepository } from './jobs.repository';
-
-function toPublicDto(job: JobRecord, includePollCount = false): JobPublicDto {
-  const base: JobPublicDto = {
-    id: job.id,
-    venueId: job.venueId,
-    provider: job.provider,
-    status: job.status,
-    lastSuccessAt: job.lastSuccessAt,
-    lastError: job.lastError,
-  };
-  if (includePollCount) {
-    return { ...base, pollCount: job.pollCount };
-  }
-  return base;
-}
 
 @Injectable()
 export class JobsService {
@@ -33,29 +23,24 @@ export class JobsService {
   ) {}
 
   async listJobs(session: SessionRecord, rawVenueId?: string): Promise<{ items: JobPublicDto[] }> {
-    let venueFilter: VenueId | undefined;
-
-    if (rawVenueId !== undefined && rawVenueId.trim() !== '' && rawVenueId !== 'ALL') {
-      const candidate = rawVenueId.trim();
-      if (!isVenueId(candidate) || !session.venueIds.includes(candidate)) {
-        throw new ForbiddenException({
-          error: 'FORBIDDEN',
-          message: 'You do not have access to the requested venue.',
-        });
-      }
-      venueFilter = candidate;
+    const resolved = resolvePermittedVenueFilter(session, rawVenueId);
+    if (!resolved.ok) {
+      throw new ForbiddenException({
+        error: 'FORBIDDEN',
+        message: 'You do not have access to the requested venue.',
+      });
     }
 
-    await this.stubService.applyFaultsAndDelay(venueFilter);
+    await this.stubService.applyFaultsAndDelay(resolved.venueFilter);
 
     const jobs = this.jobsRepository.listByTenantAndVenues(
       session.tenantId,
       session.venueIds,
-      venueFilter,
+      resolved.venueFilter,
     );
 
     return {
-      items: jobs.map((job) => toPublicDto(job)),
+      items: jobs.map((job) => toPublicJobDto(job)),
     };
   }
 
@@ -81,14 +66,26 @@ export class JobsService {
       job.pollCount += 1;
       const stubConfig = this.stubService.getConfig();
       if (!stubConfig.neverComplete && job.pollCount >= 2) {
-        job.status = 'HEALTHY';
-        job.lastSuccessAt = new Date().toISOString();
-        job.lastError = null;
-        job.pollCount = 0;
+        const shouldFail = stubConfig.forceRetryFail || job.retryOutcome === 'FAILED';
+        if (shouldFail) {
+          job.status = 'FAILED';
+          job.pollCount = 0;
+          job.retryOutcome = undefined;
+          job.lastError =
+            job.retryCount >= MAX_RETRY_ATTEMPTS
+              ? `Retry ${job.retryCount}/${MAX_RETRY_ATTEMPTS} failed (max 3/3 retries reached).`
+              : `Retry ${job.retryCount}/${MAX_RETRY_ATTEMPTS} failed — backoff interval escalated.`;
+        } else {
+          job.status = 'HEALTHY';
+          job.lastSuccessAt = new Date().toISOString();
+          job.lastError = null;
+          job.pollCount = 0;
+          job.retryOutcome = undefined;
+        }
       }
     }
 
-    return toPublicDto(job, true);
+    return toPublicJobDto(job, true);
   }
 
   retryJob(session: SessionRecord, jobId: string): { jobId: string; status: 'QUEUED' } {
@@ -133,9 +130,29 @@ export class JobsService {
       });
     }
 
+    if (job.retryCount >= MAX_RETRY_ATTEMPTS) {
+      throw new ConflictException({
+        error: 'MAX_RETRIES_EXCEEDED',
+        message: `Maximum retry limit (${MAX_RETRY_ATTEMPTS}/${MAX_RETRY_ATTEMPTS}) reached for this job.`,
+        jobId: job.id,
+        status: job.status,
+        retryCount: job.retryCount,
+        maxRetries: MAX_RETRY_ATTEMPTS,
+      });
+    }
+
+    const stubConfig = this.stubService.getConfig();
+    job.retryCount += 1;
     job.status = 'QUEUED';
     job.pollCount = 0;
-    job.retryCount += 1;
+
+    if (stubConfig.forceRetryFail) {
+      job.retryOutcome = 'FAILED';
+    } else if (job.isSimulated) {
+      job.retryOutcome = Math.random() < 0.55 ? 'HEALTHY' : 'FAILED';
+    } else {
+      job.retryOutcome = 'HEALTHY';
+    }
 
     return {
       jobId: job.id,
